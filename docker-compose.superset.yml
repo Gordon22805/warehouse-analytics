@@ -1,0 +1,38 @@
+services:
+  superset:
+    build:
+      context: ./superset
+      dockerfile: Dockerfile
+    image: warehouse-superset:4.1.4
+    container_name: warehouse_superset
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    environment:
+      SUPERSET_SECRET_KEY: ${SUPERSET_SECRET_KEY:-change_me_in_production}
+      SUPERSET_CONFIG_PATH: /app/pythonpath/superset_config.py
+      # Метаданные Superset живут в отдельной базе того же PostgreSQL,
+      # чтобы не поднимать второй сервер БД на машине с малым объёмом RAM.
+      SUPERSET_META_URI: ${SUPERSET_META_URI}
+      # Подключение к аналитической базе проекта
+      WAREHOUSE_URI: ${WAREHOUSE_URI}
+      PYTHONPATH: /app/pythonpath
+    volumes:
+      - ./superset/superset_config.py:/app/pythonpath/superset_config.py:ro
+      - ./superset/assets:/app/superset_home/assets
+    networks:
+      - warehouse-analytics_default
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8088/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 12
+      start_period: 90s
+
+networks:
+  warehouse-analytics_default:
+    external: true

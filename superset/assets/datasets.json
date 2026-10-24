@@ -1,0 +1,12 @@
+{
+  "database_id": 1,
+  "datasets": {
+    "vw_order_facts": 1,
+    "vw_warehouse_performance": 2,
+    "vw_delivery_performance": 3,
+    "vw_regional_performance": 4,
+    "vw_warehouse_daily_load": 5,
+    "vw_daily_orders": 6,
+    "vw_sla_analysis": 7
+  }
+}

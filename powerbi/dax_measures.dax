@@ -1,0 +1,172 @@
+// Меры Power BI для модели Warehouse & Logistics Analytics.
+//
+// Схема «звезда»:
+//   fact_orders            — доставленные заказы (одна строка = один заказ)
+//   fact_warehouse_load    — загрузка складов по дням
+//   dim_warehouse          — склады
+//   dim_delivery_method    — тарифы
+//   dim_region             — регионы
+//   dim_date               — календарь
+//
+// Связи (все «один ко многим», направление фильтра — от измерения к факту):
+//   dim_warehouse[warehouse_id]        -> fact_orders[warehouse_id]
+//   dim_warehouse[warehouse_id]        -> fact_warehouse_load[warehouse_id]
+//   dim_delivery_method[method_id]     -> fact_orders[method_id]
+//   dim_region[region_id]              -> fact_orders[region_id]
+//   dim_date[date]                     -> fact_orders[order_date]
+//
+// Важно: fact_orders содержит ТОЛЬКО доставленные заказы, поэтому число строк
+// факта равно числу доставленных заказов.
+
+
+// ==================== Объём и выручка ====================
+
+Total Orders =
+COUNTROWS ( fact_orders )
+
+Delivered Orders =
+COUNTROWS ( fact_orders )
+
+Revenue =
+SUM ( fact_orders[total_amount] )
+
+Average Order Value =
+DIVIDE ( [Revenue], [Delivered Orders] )
+
+Items per Order =
+DIVIDE ( SUM ( fact_orders[items_count] ), [Delivered Orders] )
+
+Delivery Revenue =
+SUM ( fact_orders[delivery_fee] )
+
+
+// ==================== Время ====================
+
+Avg Picking Minutes =
+AVERAGE ( fact_orders[picking_minutes] )
+
+Median Picking Minutes =
+MEDIAN ( fact_orders[picking_minutes] )
+
+Avg Packing Minutes =
+AVERAGE ( fact_orders[packing_minutes] )
+
+Avg Delivery Days =
+AVERAGE ( fact_orders[lead_time_days] )
+
+Avg Transit Days =
+AVERAGE ( fact_orders[transit_days] )
+
+Avg Internal Cycle Hours =
+AVERAGE ( fact_orders[fulfillment_hours] )
+
+
+// ==================== SLA ====================
+
+Delayed Orders =
+CALCULATE ( COUNTROWS ( fact_orders ), fact_orders[is_delayed] = TRUE () )
+
+On-Time Orders =
+[Delivered Orders] - [Delayed Orders]
+
+On-Time Delivery Rate =
+DIVIDE ( [On-Time Orders], [Delivered Orders] )
+
+Delay Rate =
+DIVIDE ( [Delayed Orders], [Delivered Orders] )
+
+Avg Delay Days =
+CALCULATE ( AVERAGE ( fact_orders[delay_days] ), fact_orders[is_delayed] = TRUE () )
+
+// Доля заказов, опоздавших на 2 дня и более — «тяжёлые» опоздания
+Severe Delay Rate =
+DIVIDE (
+    CALCULATE ( COUNTROWS ( fact_orders ), fact_orders[delay_days] >= 2 ),
+    [Delivered Orders]
+)
+
+
+// ==================== Загрузка складов ====================
+
+Avg Utilization =
+AVERAGE ( fact_warehouse_load[utilization] )
+
+Peak Utilization =
+MAX ( fact_warehouse_load[utilization] )
+
+Overloaded Days =
+CALCULATE ( COUNTROWS ( fact_warehouse_load ), fact_warehouse_load[utilization] > 1 )
+
+Overloaded Days Share =
+DIVIDE ( [Overloaded Days], COUNTROWS ( fact_warehouse_load ) )
+
+
+// ==================== Сравнение с сетью ====================
+
+// ALL(fact_orders) убирает фильтр по складу, но сохраняет фильтр по дате
+// из slicer — поэтому сравнение корректно внутри выбранного периода.
+Picking vs Network =
+VAR NetworkAvg =
+    CALCULATE ( AVERAGE ( fact_orders[picking_minutes] ), ALLSELECTED ( dim_warehouse ) )
+RETURN
+    DIVIDE ( [Avg Picking Minutes] - NetworkAvg, NetworkAvg )
+
+Delay Rate vs Network =
+VAR NetworkRate =
+    CALCULATE ( [Delay Rate], ALLSELECTED ( dim_warehouse ) )
+RETURN
+    [Delay Rate] - NetworkRate
+
+
+// ==================== Механизм задержки: пропуск вечернего рейса ====================
+// is_next_day_ship — предвычисленная колонка в fact_orders.
+// В DAX нельзя сравнивать две колонки внутри фильтра CALCULATE,
+// поэтому признак вынесен на этапе выгрузки.
+
+Next Day Shipments =
+CALCULATE ( COUNTROWS ( fact_orders ), fact_orders[is_next_day_ship] = TRUE () )
+
+Next Day Ship Share =
+DIVIDE ( [Next Day Shipments], [Delivered Orders] )
+
+Delay Rate Same Day Ship =
+CALCULATE ( [Delay Rate], fact_orders[is_next_day_ship] = FALSE () )
+
+Delay Rate Next Day Ship =
+CALCULATE ( [Delay Rate], fact_orders[is_next_day_ship] = TRUE () )
+
+// Во сколько раз пропуск рейса повышает риск задержки
+Dispatch Risk Ratio =
+DIVIDE ( [Delay Rate Next Day Ship], [Delay Rate Same Day Ship] )
+
+
+// ==================== Заказы после 20:00 ====================
+// is_evening_order — предвычисленная колонка (order_hour >= 20).
+
+Orders After 20 =
+CALCULATE ( COUNTROWS ( fact_orders ), fact_orders[is_evening_order] = TRUE () )
+
+Delay Rate After 20 =
+CALCULATE ( [Delay Rate], fact_orders[is_evening_order] = TRUE () )
+
+Delay Rate Before 20 =
+CALCULATE ( [Delay Rate], fact_orders[is_evening_order] = FALSE () )
+
+
+// ==================== Время (time intelligence, требует dim_date) ====================
+
+Revenue PM =
+CALCULATE ( [Revenue], DATEADD ( dim_date[date], -1, MONTH ) )
+
+Revenue MoM % =
+VAR Prev = [Revenue PM]
+RETURN
+    DIVIDE ( [Revenue] - Prev, Prev )
+
+Orders PM =
+CALCULATE ( [Delivered Orders], DATEADD ( dim_date[date], -1, MONTH ) )
+
+Orders MoM % =
+VAR Prev = [Orders PM]
+RETURN
+    DIVIDE ( [Delivered Orders] - Prev, Prev )

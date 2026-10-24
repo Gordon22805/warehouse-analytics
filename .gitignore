@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+
+.env
+
+data/raw/*.csv
+data/processed/*.csv
+data/powerbi/*.csv
+
+temp/
+temp_q*.txt
+
+.idea/
+.vscode/
+*.log
